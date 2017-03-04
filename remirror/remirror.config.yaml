@@ -1,0 +1,60 @@
+# Configuration file for Source Mage GNU/Linux repository mirroring;
+# should be copied to ~/.sourcemage/mirror.yaml
+---
+root: /srv/git/smgl
+
+projects:
+  - name: Codex
+    key: SMCDX
+    repos:
+      - grimoire: grimoire
+      - grimoire-xorg-modular: grimoire/xorg-modular
+      - grimoire-z-rejected: grimoire/z-rejected
+      - grimoire-games: grimoire/games
+      - grimoire-binary: grimoire/binary
+      - grimoire-p4_history: grimoire/grimoire-p4_history
+
+  - name: Cauldron
+    key: SMCLD
+    repos:
+      - cauldron: cauldron
+
+  - name: Tome
+    key: SMTM
+    repos:
+      - tome-rdp: tome/rdp
+      - tome-scrolls: tome/scrolls
+
+  - name: Sorcery
+    key: SMSRC
+    repos:
+      - sorcery: sorcery
+
+  - name: Wand
+    key: SMWND
+    repos:
+      - wand: wand
+
+  - name: Miscellaneous
+    key: SMMSC
+    repos:
+      - archspecs: misc/archspecs
+      - bashdoc: misc/bashdoc
+      - castfs: misc/castfs
+      - enthrall: misc/enthrall
+      - guru-tools: misc/guru-tools
+      - licenses: misc/licenses
+      - quill: misc/quill
+      - prometheus: misc/prometheus
+
+mirrors:
+  - name: github
+    username: magesync
+    token: secret
+    organization: sourcemage
+    team_id: 0
+
+  - name: bitbucket
+    username: magesync
+    token: secret
+    team: sourcemage

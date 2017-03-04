@@ -1,0 +1,369 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+#
+# (c) 2017, Vlad Glagolev <stealth@sourcemage.org>
+
+import argparse
+import os
+import shlex
+import stat
+import subprocess
+import sys
+
+from multiprocessing import Process, Queue, cpu_count
+
+try:
+    import yaml
+
+    HAS_YAML = True
+except ImportError:
+    HAS_YAML = False
+
+try:
+    import json as js
+
+    HAS_JSON = True
+except ImportError:
+    try:
+        import simplejson as js
+    except ImportError:
+        HAS_JSON = False
+
+try:
+    import requests
+
+    HAS_REQUESTS = True
+except ImportError:
+    HAS_REQUESTS = False
+
+
+__version__ = "0.0.1"  # major.minor.revision
+
+
+# ~/.sourcemage/mirror.yaml
+_DEFAULT_CONFIG = os.path.join(os.path.expanduser("~"), ".sourcemage/mirror.yaml")
+
+_CONFIG_FORMAT = {
+    'root': '',
+    'projects': ('name', 'repos'),
+    'mirrors': ('name', 'username', 'token')
+}
+
+
+class ConfigError(Exception):
+    """ Configuration file error class """
+
+    def __init__(self, message):
+        sys.stderr.write("%s: configuration error: %s\n" % (os.path.basename(sys.argv[0]), message))
+
+        exit(2)
+
+
+def check_mode(f):
+    st = os.stat(f)
+
+    if st.st_mode & (stat.S_IRGRP | stat.S_IROTH):
+        ConfigError("configuration file is group/world-readable")
+
+
+def configure(fp):
+    """ Check configuration file syntax. """
+
+    check_mode(fp.name)
+
+    try:
+        config = yaml.safe_load(fp)
+    except yaml.YAMLError as e:
+        ConfigError("syntax mismatch in configuration file '%s': %s" % (fp.name, e))
+
+    # should be replaced with schema (https://github.com/keleshev/schema)
+    for section in _CONFIG_FORMAT:
+        if section not in config:
+            ConfigError("missing section: %s" % section)
+
+        if section in ('projects', 'mirrors'):
+            if type(config[section]) != list:
+                ConfigError("section '%s' must be a list")
+
+            for key in _CONFIG_FORMAT[section]:
+                for item in config[section]:
+                    if key not in item:
+                        ConfigError("missing key in section's '%s' item: %s" % (section, key))
+
+                    if key == 'repos':
+                        if type(item[key]) != list:
+                            ConfigError("value for '%s' must be a list" % key)
+
+                        for repo in item[key]:
+                            if type(repo) != dict:
+                                ConfigError("repository item must be a dictionary")
+
+                            for k, v in repo.items():
+                                if (type(k) and type(v)) != str:
+                                    ConfigError("key/value types must be strings")
+                    else:
+                        if type(item[key]) != str:
+                            ConfigError("value for '%s' must be a string" % key)
+
+    return config
+
+
+class ReMirror(Process):
+
+    def __init__(self, queue):
+        Process.__init__(self)
+
+        self.queue = queue
+
+    def run(self):
+        while True:
+            repo = self.queue.get()
+
+            if repo is None:
+                break
+
+            repo.sync()
+
+        return
+
+
+class Repo(object):
+
+    def __init__(self, repo, project, conf):
+        self.name = repo[0]
+        self.fullpath = os.path.join(conf['root'], repo[1] + '.git')
+        self.project = project
+        self.conf = conf
+
+    def sync(self):
+        for p_conf in self.conf['mirrors']:
+            p_name = p_conf['name'].lower()
+
+            if p_name == "github":
+                provider = ProviderGitHub(p_conf)
+            elif p_name == "bitbucket":
+                provider = ProviderBitbucket(p_conf)
+            else:
+                provider = Provider(p_conf)
+
+                provider.log("unsupported mirror provider detected: '%s'" % p_name)
+
+                continue
+
+            provider.mirror(self)
+
+
+class Provider(object):
+    api_url = None
+    git_host = None
+
+    def __init__(self, conf):
+        self.conf = conf
+        self.auth = None
+        self.group = None
+
+    def mirror(self, repo):
+        if not self.group:
+            self.error("owner org/group setting for repository '%s' not found, skipping" % repo.name)
+
+        try:
+            self.sanity_check(repo)
+        except Exception as e:
+            self.error("unable to mirror repository '%s': %s" % (repo.name, e))
+
+        self.push(repo)
+
+    def sanity_check(self, repo):
+        self.error("sanity check not implemented")
+
+    def http_call(self, url, payload=None):
+        if self.api_url is None:
+            raise Exception("HTTP API calls are not implemented")
+
+        req_url = self.api_url + url.lstrip('/')
+
+        # POST
+        if payload:
+            req = requests.post(req_url, json=payload, **self.auth)
+
+            self.log("performed %s request: %s" % (req.request.method, req_url))
+        # GET
+        else:
+            req = requests.get(req_url, **self.auth)
+
+        return req
+
+    def push(self, repo):
+        git_repo = "%s:%s/%s.git" % (self.git_host, self.group, repo.name)
+        git_cmd = "git push --mirror %s" % git_repo
+
+        sub_cmd = shlex.split(git_cmd)
+
+        try:
+            self.log("pushing to %s\n" % git_repo)
+
+            sub = subprocess.Popen(sub_cmd, stdout=subprocess.PIPE,
+                                   stderr=subprocess.PIPE, cwd=repo.fullpath)
+        except (OSError, IOError) as e:
+            self.error(e)
+
+        stdout, stderr = sub.communicate()
+
+        if sub.returncode != 0:
+            self.error("pushing to %s failed: %s" % (git_repo, stderr))
+        else:
+            if stderr != '':
+                self.log(stderr)
+
+            self.log("successful push to %s\n--" % git_repo)
+
+    def log(self, message):
+        sys.stdout.write("%s\n" % message)
+
+    def error(self, message):
+        sys.stderr.write("Error: %s\n" % message)
+
+        return
+
+
+class ProviderGitHub(Provider):
+    api_url = "https://api.github.com/"
+    git_host = "git@github.com"
+
+    def __init__(self, conf):
+        super(ProviderGitHub, self).__init__(conf)
+
+        self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
+        self.group = self.conf.get('organization')
+        self.team_id = self.conf.get('team_id')
+
+    def sanity_check(self, repo):
+        repo_ok = "/repos/{0}/{1}".format(self.group, repo.name)
+
+        req = self.http_call(repo_ok)
+
+        if req.status_code == 404:
+            repo_mk = "/orgs/{0}/repos".format(self.group)
+
+            payload = {'name': repo.name,
+                       'has_wiki': False,
+                       'has_issues': False}
+
+            if self.team_id:
+                payload['team_id'] = self.team_id
+
+            req = self.http_call(repo_mk, payload)
+
+            req.raise_for_status()
+        else:
+            req.raise_for_status()
+
+
+class ProviderBitbucket(Provider):
+    api_url = "https://api.bitbucket.org/2.0/"
+    git_host = "git@bitbucket.org"
+
+    def __init__(self, conf):
+        super(ProviderBitbucket, self).__init__(conf)
+
+        self.auth = {'auth': (self.conf['username'], self.conf['token'])}
+        self.group = self.conf.get('team')
+
+    def sanity_check(self, repo):
+        repo_ok = "/repositories/{0}/{1}".format(self.group, repo.name)
+
+        req = self.http_call(repo_ok)
+
+        if req.status_code == 404:
+            payload = {'scm': "git",
+                       'has_wiki': False,
+                       'has_issues': False}
+
+            if repo.project[1] is not None:
+                project_ok = "/teams/{0}/projects/{1}".format(self.group, repo.project[1])
+
+                req = self.http_call(project_ok)
+
+                if req.status_code == 404:
+                    project_mk = project_ok[:project_ok.rfind('/') + 1]
+
+                    payload_proj = {'name': repo.project[0],
+                                    'key': repo.project[1]}
+
+                    req = self.http_call(project_mk, payload_proj)
+
+                    req.raise_for_status()
+                else:
+                    req.raise_for_status()
+
+                payload['project'] = {'key': repo.project[1]}
+
+            repo_mk = repo_ok
+
+            req = self.http_call(repo_mk, payload)
+
+            req.raise_for_status()
+        else:
+            req.raise_for_status()
+
+
+def mirror(conf):
+    queue = Queue()
+
+    proc_num = cpu_count() * 2
+
+    repos = []
+
+    for p in conf['projects']:
+        project = p['name'], p.get('key')
+
+        for r in p['repos']:
+            repos.append(Repo(r.popitem(), project, conf))
+
+    procs = []
+
+    for _ in xrange(proc_num):
+        proc = ReMirror(queue)
+
+        procs.append(proc)
+
+        proc.start()
+
+    for repo in repos:
+        queue.put(repo)
+
+    # poison pill
+    for _ in xrange(proc_num):
+        queue.put(None)
+
+    for proc in procs:
+        proc.join()
+
+
+def main():
+    if not HAS_YAML:
+        ConfigError("pyyaml (http://pyyaml.org/) is mandatory for the run")
+
+    if not HAS_JSON:
+        ConfigError("built-in json or external simplejson module is missing")
+
+    if not HAS_REQUESTS:
+        ConfigError("requests (http://python-requests.org/) is mandatory for the run")
+
+    parser = argparse.ArgumentParser(description='Repository mirror tool')
+
+    parser.add_argument("-v", "--version", action='version',
+                        version='%(prog)s {0}'.format(__version__))
+    parser.add_argument("-c", "--config", type=argparse.FileType('r'),
+                        default=_DEFAULT_CONFIG,
+                        help="configuration file in YAML format (default: %(default)s)")
+
+    args = parser.parse_args()
+
+    config = configure(args.config)
+
+    mirror(config)
+
+
+if __name__ == "__main__":
+    main()
