@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# (c) 2017, Vlad Glagolev <stealth@sourcemage.org>
+# (c) 2017-2018, Vlad Glagolev <stealth@sourcemage.org>
 
 import argparse
 import os
@@ -83,7 +83,7 @@ def configure(fp):
 
         if section in ('projects', 'mirrors'):
             if type(config[section]) != list:
-                ConfigError("section '%s' must be a list")
+                ConfigError("section '%s' must be a list" % section)
 
             for key in _CONFIG_FORMAT[section]:
                 for item in config[section]:
