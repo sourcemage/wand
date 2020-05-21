@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# (c) 2017-2018, Vlad Glagolev <stealth@sourcemage.org>
+# (c) 2017-2020, Vlad Glagolev <stealth@sourcemage.org>
 
 import argparse
 import os
@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.1"  # major.minor.revision
+__version__ = "0.0.2"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -46,7 +46,13 @@ _DEFAULT_CONFIG = os.path.join(os.path.expanduser("~"), ".sourcemage/mirror.yaml
 _CONFIG_FORMAT = {
     'root': '',
     'projects': ('name', 'repos'),
-    'mirrors': ('name', 'username', 'token')
+    'mirrors': ('name', 'username')
+}
+
+PROVIDERS = {
+    'github': 'ProviderGitHub',
+    'bitbucket': 'ProviderBitbucket',
+    'sourcehut': 'ProviderSourcehut'
 }
 
 
@@ -136,21 +142,27 @@ class Repo(object):
         self.conf = conf
 
     def sync(self):
+        if not os.path.isdir(self.fullpath):
+            self.error("'%s' repository doesn't exist, skipping" % self.fullpath)
+
+            return
+
         for p_conf in self.conf['mirrors']:
             p_name = p_conf['name'].lower()
 
-            if p_name == "github":
-                provider = ProviderGitHub(p_conf)
-            elif p_name == "bitbucket":
-                provider = ProviderBitbucket(p_conf)
-            else:
+            provider = PROVIDERS.get(p_name)
+
+            if provider is None:
                 provider = Provider(p_conf)
 
                 provider.log("unsupported mirror provider detected: '%s'" % p_name)
 
                 continue
+            else:
+                globals()[provider](p_conf).mirror(self)
 
-            provider.mirror(self)
+    def error(self, message):
+        sys.stderr.write("Error: %s\n" % message)
 
 
 class Provider(object):
@@ -194,7 +206,12 @@ class Provider(object):
         return req
 
     def push(self, repo):
-        git_repo = "%s:%s/%s.git" % (self.git_host, self.group, repo.name)
+        # special case for sourcehut:
+        if self.group.startswith('~'):
+            git_repo = "%s:%s/%s" % (self.git_host, self.group, repo.name)
+        else:
+            git_repo = "%s:%s/%s.git" % (self.git_host, self.group, repo.name)
+
         git_cmd = "git push --mirror %s" % git_repo
 
         sub_cmd = shlex.split(git_cmd)
@@ -222,8 +239,6 @@ class Provider(object):
 
     def error(self, message):
         sys.stderr.write("Error: %s\n" % message)
-
-        return
 
 
 class ProviderGitHub(Provider):
@@ -305,6 +320,31 @@ class ProviderBitbucket(Provider):
             req.raise_for_status()
         else:
             req.raise_for_status()
+
+
+class ProviderSourcehut(Provider):
+    api_url = "https://git.sr.ht/api/"
+    web_url = "https://git.sr.ht/"
+    git_host = "git@git.sr.ht"
+
+    def __init__(self, conf):
+        super(ProviderSourcehut, self).__init__(conf)
+
+        self.group = '~' + self.conf.get('organization')
+
+    def sanity_check(self, repo):
+        repo_ok = "/{0}/{1}/".format(self.group, repo.name)
+
+        req = self.http_call(repo_ok)
+
+        req.raise_for_status()
+
+    def http_call(self, url):
+        req_url = self.web_url + url.lstrip('/')
+
+        req = requests.get(req_url)
+
+        return req
 
 
 def mirror(conf):

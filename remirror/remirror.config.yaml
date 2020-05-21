@@ -57,4 +57,7 @@ mirrors:
   - name: bitbucket
     username: magesync
     token: secret
-    team: sourcemage
+
+  - name: sourcehut
+    username: magesync
+    organization: sourcemage
