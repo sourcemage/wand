@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.2"  # major.minor.revision
+__version__ = "0.0.3"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -46,7 +46,7 @@ _DEFAULT_CONFIG = os.path.join(os.path.expanduser("~"), ".sourcemage/mirror.yaml
 _CONFIG_FORMAT = {
     'root': '',
     'projects': ('name', 'repos'),
-    'mirrors': ('name', 'username')
+    'mirrors': ('name', 'username', 'token')
 }
 
 PROVIDERS = {
@@ -324,27 +324,20 @@ class ProviderBitbucket(Provider):
 
 class ProviderSourcehut(Provider):
     api_url = "https://git.sr.ht/api/"
-    web_url = "https://git.sr.ht/"
     git_host = "git@git.sr.ht"
 
     def __init__(self, conf):
         super(ProviderSourcehut, self).__init__(conf)
 
+        self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
         self.group = '~' + self.conf.get('organization')
 
     def sanity_check(self, repo):
-        repo_ok = "/{0}/{1}/".format(self.group, repo.name)
+        repo_ok = "/{0}/repos/{1}".format(self.group, repo.name)
 
         req = self.http_call(repo_ok)
 
         req.raise_for_status()
-
-    def http_call(self, url):
-        req_url = self.web_url + url.lstrip('/')
-
-        req = requests.get(req_url)
-
-        return req
 
 
 def mirror(conf):

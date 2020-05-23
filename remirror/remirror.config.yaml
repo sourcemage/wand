@@ -60,4 +60,5 @@ mirrors:
 
   - name: sourcehut
     username: magesync
+    token: secret
     organization: sourcemage
