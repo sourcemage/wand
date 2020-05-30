@@ -7,45 +7,45 @@ projects:
   - name: Codex
     key: SMCDX
     repos:
-      - grimoire: grimoire
-      - grimoire-xorg-modular: grimoire/xorg-modular
-      - grimoire-z-rejected: grimoire/z-rejected
-      - grimoire-games: grimoire/games
-      - grimoire-binary: grimoire/binary
-      - grimoire-p4_history: grimoire/grimoire-p4_history
+      - grimoire: grimoire.git
+      - grimoire-xorg-modular: grimoire/xorg-modular.git
+      - grimoire-z-rejected: grimoire/z-rejected.git
+      - grimoire-games: grimoire/games.git
+      - grimoire-binary: grimoire/binary.git
+      - grimoire-p4_history: grimoire/grimoire-p4_history.git
 
   - name: Cauldron
     key: SMCLD
     repos:
-      - cauldron: cauldron
+      - cauldron: cauldron.git
 
   - name: Tome
     key: SMTM
     repos:
-      - tome-rdp: tome/rdp
-      - tome-scrolls: tome/scrolls
+      - tome-rdp: tome/rdp.git
+      - tome-scrolls: tome/scrolls.git
 
   - name: Sorcery
     key: SMSRC
     repos:
-      - sorcery: sorcery
+      - sorcery: sorcery.git
 
   - name: Wand
     key: SMWND
     repos:
-      - wand: wand
+      - wand: wand.git
 
   - name: Miscellaneous
     key: SMMSC
     repos:
-      - archspecs: misc/archspecs
-      - bashdoc: misc/bashdoc
-      - castfs: misc/castfs
-      - enthrall: misc/enthrall
-      - guru-tools: misc/guru-tools
-      - licenses: misc/licenses
-      - quill: misc/quill
-      - prometheus: misc/prometheus
+      - archspecs: misc/archspecs.git
+      - bashdoc: misc/bashdoc.git
+      - castfs: misc/castfs.git
+      - enthrall: misc/enthrall.git
+      - guru-tools: misc/guru-tools.git
+      - licenses: misc/licenses.git
+      - quill: misc/quill.git
+      - prometheus: misc/prometheus.git
 
 mirrors:
   - name: github

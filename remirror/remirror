@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.3"  # major.minor.revision
+__version__ = "0.0.4"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -52,7 +52,7 @@ _CONFIG_FORMAT = {
 PROVIDERS = {
     'github': 'ProviderGitHub',
     'bitbucket': 'ProviderBitbucket',
-    'sourcehut': 'ProviderSourcehut'
+    'sourcehut': 'ProviderSourceHut'
 }
 
 
@@ -82,6 +82,11 @@ def configure(fp):
     except yaml.YAMLError as e:
         ConfigError("syntax mismatch in configuration file '%s': %s" % (fp.name, e))
 
+    try:
+        root = config['root']
+    except KeyError as e:
+        ConfigError("missing section: %s" % e)
+
     # should be replaced with schema (https://github.com/keleshev/schema)
     for section in _CONFIG_FORMAT:
         if section not in config:
@@ -105,8 +110,16 @@ def configure(fp):
                                 ConfigError("repository item must be a dictionary")
 
                             for k, v in repo.items():
-                                if (type(k) and type(v)) != str:
+                                if type(k) != str or type(v) != str:
                                     ConfigError("key/value types must be strings")
+
+                                fullpath = v if os.path.isabs(v) else os.path.join(root, v)
+
+                                if os.path.isdir(fullpath):
+                                    # overwrite with full path value
+                                    repo[k] = fullpath
+                                else:
+                                    ConfigError("repository path '%s' doesn't exist" % k)
                     else:
                         if type(item[key]) != str:
                             ConfigError("value for '%s' must be a string" % key)
@@ -136,17 +149,11 @@ class ReMirror(Process):
 class Repo(object):
 
     def __init__(self, repo, project, conf):
-        self.name = repo[0]
-        self.fullpath = os.path.join(conf['root'], repo[1] + '.git')
+        self.name, self.fullpath = repo
         self.project = project
         self.conf = conf
 
     def sync(self):
-        if not os.path.isdir(self.fullpath):
-            self.error("'%s' repository doesn't exist, skipping" % self.fullpath)
-
-            return
-
         for p_conf in self.conf['mirrors']:
             p_name = p_conf['name'].lower()
 
@@ -322,12 +329,12 @@ class ProviderBitbucket(Provider):
             req.raise_for_status()
 
 
-class ProviderSourcehut(Provider):
+class ProviderSourceHut(Provider):
     api_url = "https://git.sr.ht/api/"
     git_host = "git@git.sr.ht"
 
     def __init__(self, conf):
-        super(ProviderSourcehut, self).__init__(conf)
+        super(ProviderSourceHut, self).__init__(conf)
 
         self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
         self.group = '~' + self.conf.get('organization')
