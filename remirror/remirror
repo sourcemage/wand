@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# (c) 2017-2020, Vlad Glagolev <stealth@sourcemage.org>
+# (c) 2017-2021, Vlad Glagolev <stealth@sourcemage.org>
 
 import argparse
 import os
@@ -10,7 +10,7 @@ import stat
 import subprocess
 import sys
 
-from multiprocessing import Process, Queue, cpu_count
+from multiprocessing import Process, Queue, Value, cpu_count
 
 try:
     import yaml
@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.4"  # major.minor.revision
+__version__ = "0.0.5"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -129,10 +129,11 @@ def configure(fp):
 
 class ReMirror(Process):
 
-    def __init__(self, queue):
+    def __init__(self, queue, errcode):
         Process.__init__(self)
 
         self.queue = queue
+        self.errcode = errcode
 
     def run(self):
         while True:
@@ -141,7 +142,7 @@ class ReMirror(Process):
             if repo is None:
                 break
 
-            repo.sync()
+            repo.sync(self.errcode)
 
         return
 
@@ -153,20 +154,20 @@ class Repo(object):
         self.project = project
         self.conf = conf
 
-    def sync(self):
+    def sync(self, errcode):
         for p_conf in self.conf['mirrors']:
             p_name = p_conf['name'].lower()
 
             provider = PROVIDERS.get(p_name)
 
             if provider is None:
-                provider = Provider(p_conf)
+                provider = Provider(p_conf, errcode)
 
                 provider.log("unsupported mirror provider detected: '%s'" % p_name)
 
                 continue
             else:
-                globals()[provider](p_conf).mirror(self)
+                globals()[provider](p_conf, errcode).mirror(self)
 
     def error(self, message):
         sys.stderr.write("Error: %s\n" % message)
@@ -176,8 +177,9 @@ class Provider(object):
     api_url = None
     git_host = None
 
-    def __init__(self, conf):
+    def __init__(self, conf, errcode):
         self.conf = conf
+        self.errcode = errcode
         self.auth = None
         self.group = None
 
@@ -245,6 +247,8 @@ class Provider(object):
         sys.stdout.write("%s\n" % message)
 
     def error(self, message):
+        self.errcode.value = 1
+
         sys.stderr.write("Error: %s\n" % message)
 
 
@@ -252,8 +256,8 @@ class ProviderGitHub(Provider):
     api_url = "https://api.github.com/"
     git_host = "git@github.com"
 
-    def __init__(self, conf):
-        super(ProviderGitHub, self).__init__(conf)
+    def __init__(self, conf, errcode):
+        super(ProviderGitHub, self).__init__(conf, errcode)
 
         self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
         self.group = self.conf.get('organization')
@@ -285,8 +289,8 @@ class ProviderBitbucket(Provider):
     api_url = "https://api.bitbucket.org/2.0/"
     git_host = "git@bitbucket.org"
 
-    def __init__(self, conf):
-        super(ProviderBitbucket, self).__init__(conf)
+    def __init__(self, conf, errcode):
+        super(ProviderBitbucket, self).__init__(conf, errcode)
 
         self.auth = {'auth': (self.conf['username'], self.conf['token'])}
         self.group = self.conf.get('team')
@@ -333,8 +337,8 @@ class ProviderSourceHut(Provider):
     api_url = "https://git.sr.ht/api/"
     git_host = "git@git.sr.ht"
 
-    def __init__(self, conf):
-        super(ProviderSourceHut, self).__init__(conf)
+    def __init__(self, conf, errcode):
+        super(ProviderSourceHut, self).__init__(conf, errcode)
 
         self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
         self.group = '~' + self.conf.get('organization')
@@ -349,6 +353,7 @@ class ProviderSourceHut(Provider):
 
 def mirror(conf):
     queue = Queue()
+    errcode = Value('i', 0)
 
     proc_num = cpu_count() * 2
 
@@ -363,7 +368,7 @@ def mirror(conf):
     procs = []
 
     for _ in xrange(proc_num):
-        proc = ReMirror(queue)
+        proc = ReMirror(queue, errcode)
 
         procs.append(proc)
 
@@ -378,6 +383,8 @@ def mirror(conf):
 
     for proc in procs:
         proc.join()
+
+    return errcode.value
 
 
 def main():
@@ -402,7 +409,7 @@ def main():
 
     config = configure(args.config)
 
-    mirror(config)
+    sys.exit(mirror(config))
 
 
 if __name__ == "__main__":
