@@ -346,7 +346,8 @@ class ProviderSourceHut(Provider):
     def sanity_check(self, repo):
         # GraphQL
         graphql = "/query"
-        repo_ok = {'query': '{{ repositoryByOwner(owner: "{0}", repo: "{1}") {{ name }} }}'.format(self.group, repo.name)}
+        repo_ok = {'query': 'query GetRepo($owner: String!, $repo: String!) { repositoryByOwner(owner: $owner, repo: $repo) { name } }',
+                   'variables': {'owner': self.group, 'repo': repo.name}}
 
         req = self.http_call(graphql, repo_ok)
 
