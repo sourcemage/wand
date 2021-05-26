@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.5"  # major.minor.revision
+__version__ = "0.0.6"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -334,21 +334,32 @@ class ProviderBitbucket(Provider):
 
 
 class ProviderSourceHut(Provider):
-    api_url = "https://git.sr.ht/api/"
+    api_url = "https://git.sr.ht/"
     git_host = "git@git.sr.ht"
 
     def __init__(self, conf, errcode):
         super(ProviderSourceHut, self).__init__(conf, errcode)
 
-        self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
+        self.auth = {'headers': {"Authorization": "Bearer %s" % self.conf['token']}}
         self.group = '~' + self.conf.get('organization')
 
     def sanity_check(self, repo):
-        repo_ok = "/{0}/repos/{1}".format(self.group, repo.name)
+        # GraphQL
+        graphql = "/query"
+        repo_ok = {'query': '{{ repositoryByOwner(owner: "{0}", repo: "{1}") {{ name }} }}'.format(self.group, repo.name)}
 
-        req = self.http_call(repo_ok)
+        req = self.http_call(graphql, repo_ok)
 
         req.raise_for_status()
+
+        data = req.json()['data']
+
+        # empty data equals server error
+        if data is None:
+            raise requests.HTTPError(500)
+
+        if data.get('repositoryByOwner') is None:
+            raise requests.HTTPError(404)
 
 
 def mirror(conf):
