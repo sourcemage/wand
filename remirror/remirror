@@ -360,7 +360,18 @@ class ProviderSourceHut(Provider):
             raise requests.HTTPError(500)
 
         if data.get('repositoryByOwner') is None:
-            raise requests.HTTPError(404)
+            repo_mk = {'query': 'mutation CreateRepo($name: String!, $description: String, $visibility: Visibility!) { createRepository(name: $name, description: $description, visibility: $visibility) { name } }',
+                       'variables': {'name': repo.name, 'visibility': 'public'.upper()}}
+
+            req = self.http_call(graphql, repo_mk)
+
+            req.raise_for_status()
+
+            data = req.json()['data']
+
+            # empty data equals server error
+            if data is None or data.get('createRepository') is None:
+                raise requests.HTTPError(500)
 
 
 def mirror(conf):
