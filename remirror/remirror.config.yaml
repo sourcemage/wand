@@ -62,3 +62,8 @@ mirrors:
     username: magesync
     token: secret
     organization: sourcemage
+
+  - name: codeberg
+    username: magesync
+    token: secret
+    organization: sourcemage

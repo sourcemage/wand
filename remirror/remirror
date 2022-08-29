@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 #
-# (c) 2017-2021, Vlad Glagolev <stealth@sourcemage.org>
+# (c) 2017-2022, Vlad Glagolev <stealth@sourcemage.org>
 
 import argparse
 import os
@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.6"  # major.minor.revision
+__version__ = "0.0.7"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -52,7 +52,8 @@ _CONFIG_FORMAT = {
 PROVIDERS = {
     'github': 'ProviderGitHub',
     'bitbucket': 'ProviderBitbucket',
-    'sourcehut': 'ProviderSourceHut'
+    'sourcehut': 'ProviderSourceHut',
+    'codeberg': 'ProviderCodeberg'
 }
 
 
@@ -361,6 +362,40 @@ class ProviderSourceHut(Provider):
 
         if data.get('repositoryByOwner') is None:
             raise requests.HTTPError(404)
+
+
+class ProviderGitea(Provider):
+    api_url = None
+    git_host = None
+
+    def __init__(self, conf, errcode):
+        super(ProviderGitea, self).__init__(conf, errcode)
+
+        self.auth = {'headers': {"Authorization": "token %s" % self.conf['token']}}
+        self.group = self.conf.get('organization')
+        self.default_branch = "master"
+
+    def sanity_check(self, repo):
+        repo_ok = "/repos/{0}/{1}".format(self.group, repo.name)
+
+        req = self.http_call(repo_ok)
+
+        if req.status_code == 404:
+            repo_mk = "/orgs/{0}/repos".format(self.group)
+
+            payload = {'name': repo.name,
+                       'default_branch': self.default_branch}
+
+            req = self.http_call(repo_mk, payload)
+
+            req.raise_for_status()
+        else:
+            req.raise_for_status()
+
+
+class ProviderCodeberg(ProviderGitea):
+    api_url = "https://codeberg.org/api/v1/"
+    git_host = "git@codeberg.org"
 
 
 def mirror(conf):
