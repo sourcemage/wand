@@ -37,7 +37,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 
-__version__ = "0.0.7"  # major.minor.revision
+__version__ = "0.0.8"  # major.minor.revision
 
 
 # ~/.sourcemage/mirror.yaml
@@ -192,8 +192,8 @@ class Provider(object):
             self.sanity_check(repo)
         except Exception as e:
             self.error("unable to mirror repository '%s': %s" % (repo.name, e))
-
-        self.push(repo)
+        else:
+            self.push(repo)
 
     def sanity_check(self, repo):
         self.error("sanity check not implemented")
@@ -342,13 +342,17 @@ class ProviderSourceHut(Provider):
         super(ProviderSourceHut, self).__init__(conf, errcode)
 
         self.auth = {'headers': {"Authorization": "Bearer %s" % self.conf['token']}}
+        self.username = '~' + self.conf['username']
         self.group = '~' + self.conf.get('organization')
+        self._group = self.conf.get('organization')
+        self.visibility = 'public'
+        self.mode = 'rw'
 
     def sanity_check(self, repo):
         # GraphQL
         graphql = "/query"
-        repo_ok = {'query': 'query GetRepo($owner: String!, $repo: String!) { repositoryByOwner(owner: $owner, repo: $repo) { name } }',
-                   'variables': {'owner': self.group, 'repo': repo.name}}
+        repo_ok = {'query': 'query getRepo($owner: String!, $repo: String!) { user(username: $owner) { repository(name: $repo) { name } } }',
+                   'variables': {'owner': self._group, 'repo': repo.name}}
 
         req = self.http_call(graphql, repo_ok)
 
@@ -357,11 +361,35 @@ class ProviderSourceHut(Provider):
         data = req.json()['data']
 
         # empty data equals server error
-        if data is None:
+        if data is None or data.get('user') is None:
             raise requests.HTTPError(500)
 
-        if data.get('repositoryByOwner') is None:
-            raise requests.HTTPError(404)
+        if data['user'].get('repository') is None:
+            repo_mk = {'query': 'mutation createRepo($repo: String!, $visibility: Visibility!) { createRepository(name: $repo, visibility: $visibility) { id } }',
+                       'variables': {'repo': repo.name, 'visibility': self.visibility.upper()}}
+
+            req = self.http_call(graphql, repo_mk)
+
+            data = req.json()['data']
+
+            # empty data equals server error
+            if data is None or data.get('createRepository') is None:
+                raise requests.HTTPError(500)
+            else:
+                repo_id = data['createRepository']['id']
+
+            repo_add_user = {'query': 'mutation addUser($repo_id: Int!, $mode: AccessMode!, $user_id: ID!) { updateACL(repoId: $repo_id, mode: $mode, entity: $user_id) { id } }',
+                            'variables': {'repo_id': repo_id, 'mode': self.mode.upper(), 'user_id': self.username}}
+
+            req = self.http_call(graphql, repo_add_user)
+
+            req.raise_for_status()
+
+            data = req.json()['data']
+
+            # empty data equals server error
+            if data is None or data.get('updateACL') is None:
+                raise requests.HTTPError(500)
 
 
 class ProviderGitea(Provider):
